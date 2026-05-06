@@ -58,6 +58,33 @@
         <input type="number" id="settingConcurrency" min="1" placeholder="默认">
       </div>
     </div>
+    <div class="enhanced-section">
+      <h2 class="section-title">增强功能</h2>
+      <div class="enhanced-row">
+        <label class="enhanced-checkbox-label">
+          <input type="checkbox" id="enhancedEnabled">
+          启用章节范围下载
+        </label>
+        <span class="enhanced-field">
+          <label for="startChapter">起始章节</label>
+          <input type="number" id="startChapter" min="0" placeholder="0">
+        </span>
+        <span class="enhanced-field">
+          <label for="endChapter">结束章节</label>
+          <input type="number" id="endChapter" min="0" placeholder="999">
+        </span>
+      </div>
+      <div class="enhanced-row">
+        <label class="enhanced-checkbox-label">
+          <input type="checkbox" id="enableMerge">
+          启用合并
+        </label>
+        <span class="enhanced-field enhanced-path-field">
+          <label for="mergeFilePath">目标文件路径</label>
+          <input type="text" id="mergeFilePath" placeholder="输入已下载 EPUB 文件的绝对路径">
+        </span>
+      </div>
+    </div>
   </section>
 
   <main class="main-content">
@@ -152,6 +179,15 @@
     const settingLanguage = document.getElementById('settingLanguage')
     const settingSearchLimit = document.getElementById('settingSearchLimit')
     const settingConcurrency = document.getElementById('settingConcurrency')
+    const enhancedEnabled = document.getElementById('enhancedEnabled')
+    const enableMerge = document.getElementById('enableMerge')
+    const startChapterInput = document.getElementById('startChapter')
+    const endChapterInput = document.getElementById('endChapter')
+    const mergeFilePathInput = document.getElementById('mergeFilePath')
+
+    const toggleInputState = (checkbox, ...inputs) => {
+      inputs.forEach(input => { input.disabled = !checkbox.checked })
+    }
 
     const SETTINGS_KEY = 'sonovel-settings'
     // 服务器配置限制值
@@ -164,6 +200,14 @@
         settingLanguage.value = saved.language || ''
         settingSearchLimit.value = saved.searchLimit || ''
         settingConcurrency.value = saved.concurrency || ''
+        // 增强功能
+        enhancedEnabled.checked = saved.enhancedEnabled || false
+        enableMerge.checked = saved.enableMerge || false
+        startChapterInput.value = saved.startChapter || ''
+        endChapterInput.value = saved.endChapter || ''
+        mergeFilePathInput.value = saved.mergeFilePath || ''
+        toggleInputState(enhancedEnabled, startChapterInput, endChapterInput)
+        toggleInputState(enableMerge, mergeFilePathInput)
       } catch (_) {}
     }
 
@@ -173,6 +217,11 @@
         language: settingLanguage.value,
         searchLimit: settingSearchLimit.value,
         concurrency: settingConcurrency.value,
+        enhancedEnabled: enhancedEnabled.checked,
+        enableMerge: enableMerge.checked,
+        startChapter: startChapterInput.value,
+        endChapter: endChapterInput.value,
+        mergeFilePath: mergeFilePathInput.value,
       }))
     }
 
@@ -224,6 +273,17 @@
       updateDefaultFormatLabels()
     })
     settingLanguage.addEventListener('change', saveSettings)
+    enhancedEnabled.addEventListener('change', () => {
+      toggleInputState(enhancedEnabled, startChapterInput, endChapterInput)
+      saveSettings()
+    })
+    enableMerge.addEventListener('change', () => {
+      toggleInputState(enableMerge, mergeFilePathInput)
+      saveSettings()
+    })
+    startChapterInput.addEventListener('change', saveSettings)
+    endChapterInput.addEventListener('change', saveSettings)
+    mergeFilePathInput.addEventListener('change', saveSettings)
     settingSearchLimit.addEventListener('change', () => {
       if (bookCache.length > 0) {
         currentPage = 1
@@ -292,6 +352,16 @@
       if (settingConcurrency.value) {
         params.set('concurrency', settingConcurrency.value)
       }
+      // 增强功能参数
+      if (enhancedEnabled.checked) {
+        const start = parseInt(startChapterInput.value)
+        const end = parseInt(endChapterInput.value)
+        if (!isNaN(start)) params.set('startChapter', start)
+        if (!isNaN(end)) params.set('endChapter', end)
+      }
+      if (enableMerge.checked && mergeFilePathInput.value.trim()) {
+        params.set('mergeFilePath', mergeFilePathInput.value.trim())
+      }
       try {
         const resp = await fetch(`/book-fetch?${params.toString()}`)
 
@@ -301,7 +371,11 @@
         }
 
         await fetchLocalBooks()
-        location.href = `/book-download?filename=${latestFileName}`
+        // 合并操作时文件已在原位置更新，不自动下载到本地
+        const isMerge = enableMerge.checked && mergeFilePathInput.value.trim()
+        if (!isMerge) {
+          location.href = `/book-download?filename=${latestFileName}`
+        }
 
       } catch (error) {
         alert(`下载书籍到服务器失败: ${error.message}`)

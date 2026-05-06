@@ -17,3 +17,7 @@ logs/
 bundle/jre*.zip
 
 config-dev.ini
+
+.files/*
+.claude/*
+.venv/*

@@ -60,37 +60,39 @@ public class Crawler {
     }
 
     /**
-     * 爬取小说
+     * 下载章节到临时目录（不执行后处理合并）
      *
      * @param bookUrl 详情页链接
      * @param toc     章节目录
-     * @return 总耗时
+     * @return 临时目录，null 表示失败
      */
     @SneakyThrows
-    public double crawl(String bookUrl, List<Chapter> toc) {
+    public File crawlRaw(String bookUrl, List<Chapter> toc) {
+        if (CollUtil.isEmpty(toc)) {
+            Console.error("<== 源站章节目录为空，中止下载");
+            return null;
+        }
+
         digitCount = String.valueOf(toc.size()).length();
         Book book = new BookParser(config).parse(bookUrl);
         BookContext.set(book);
 
-        // 下载临时目录名格式：书名 (作者) EXT
         bookDir = FileUtils.sanitizeFileName(
                 "%s (%s) %s".formatted(book.getBookName(), book.getAuthor(), config.getExtName().toUpperCase()));
         File dir = FileUtil.mkdir(new File(config.getDownloadPath() + File.separator + bookDir));
         if (!dir.exists()) {
-            Console.log(render("""
+            Console.error(render("""
                     创建下载目录失败：%s
                     1. 检查 config.ini 下载路径是否合法
                     2. 尝试以管理员身份运行（部分目录需要管理员权限）
                     """.formatted(dir), "red"));
-            return 0;
+            return null;
         }
 
-        // 并发数最大值为 100
         if (config.getConcurrency() > 100) {
             config.setConcurrency(100);
         }
 
-        // IO 密集型任务，不要和 CPU 核数绑定
         int maxConcurrent = config.getConcurrency() == -1
                 ? Math.min(50, toc.size())
                 : Math.min(config.getConcurrency(), toc.size());
@@ -100,8 +102,6 @@ public class Crawler {
         LogUtils.info("开始下载:《{}》({}) 共计 {} 章 | 最大并发：{}",
                 book.getBookName(), book.getAuthor(), toc.size(), maxConcurrent);
 
-        StopWatch stopWatch = new StopWatch();
-        stopWatch.start();
         ChapterParser chapterParser = new ChapterParser(config);
 
         ProgressBar progressBar = null;
@@ -120,7 +120,6 @@ public class Crawler {
         ProgressBar finalProgressBar = progressBar;
         AtomicInteger completed = new AtomicInteger(0);
 
-        // IO 密集任务，瓶颈在网络和磁盘而不是 CPU
         try (var limiter = new VirtualThreadLimiter(maxConcurrent)) {
             toc.forEach(item -> limiter.submit(() -> {
                 createChapterFile(chapterParser.parse(item));
@@ -143,13 +142,32 @@ public class Crawler {
         if (progressBar != null) {
             progressBar.close();
         }
+
+        return dir;
+    }
+
+    /**
+     * 爬取小说
+     *
+     * @param bookUrl 详情页链接
+     * @param toc     章节目录
+     * @return 总耗时
+     */
+    @SneakyThrows
+    public double crawl(String bookUrl, List<Chapter> toc) {
+        StopWatch stopWatch = new StopWatch();
+        stopWatch.start();
+
+        File dir = crawlRaw(bookUrl, toc);
+        if (dir == null) return 0;
+
         LogUtils.info("-".repeat(100));
         Console.log("<== 章节下载日志已保存至 {}，请检查是否有 [ERROR] 级别的日志。",
                 LogUtils.getLogFile().getAbsolutePath());
 
         new CrawlerPostHandler(config).handle(dir);
-        stopWatch.stop();
         BookContext.clear();
+        stopWatch.stop();
 
         double totalTimeSeconds = stopWatch.getTotalTimeSeconds();
         Console.log(render("<== 完成！总耗时 {} s\n", "green"), NumberUtil.round(totalTimeSeconds, 2));
